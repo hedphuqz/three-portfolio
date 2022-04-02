@@ -2,21 +2,24 @@
 import { onMounted, onUnmounted, ref } from "@vue/runtime-core";
 import {
   animate,
+  createArrow,
   createWireSphere,
   initScene,
   resizeScene,
+  setupPostProcessing,
   tweenCamera,
 } from "./utils/three";
 import * as THREE from 'three'
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 
 const threeContainer = ref<null | HTMLDivElement>(null);
 const { camera, renderer, scene, controls } = initScene();
-const onResizeScreen = () => resizeScene(renderer, camera)
+const composer = setupPostProcessing(renderer, scene, camera)
 
+const onResizeScreen = () => resizeScene(renderer, camera)
 
 const {sphere, geometry} = createWireSphere();
 scene.add(sphere);
+
 
 // Setup arrayBuffers for wobbliness
 const bufferGeometryCount =  geometry.attributes.position.count
@@ -33,19 +36,24 @@ if (process.env.NODE_ENV === 'development') {
 
 }
 
-// Define initial camera starting point
-camera.position.z = 8
 
-onMounted(() => {
+onMounted(async () => {
   if (threeContainer.value === null) {
     return;  
   } else {
     threeContainer.value.appendChild(renderer.domElement);
   }
 
-  // Our dramatic zoom in...
-  tweenCamera(camera, controls, {z: 1})
+  const arrow = await createArrow('down', [0, 0, 0.6])
+  scene.add(arrow)
 
+
+if (process.env.NODE_ENV === 'production'){  
+  // Define initial camera starting point
+  camera.position.z = 8
+  // Our dramatic zoom in...
+  tweenCamera(camera, {z: 1})
+}
   renderer.setAnimationLoop((time: number) => {
 
     const now = Date.now() * 0.005
@@ -65,22 +73,19 @@ onMounted(() => {
       const iY = i * 3 + 1
       const iZ = i * 3 + 2
 
-    geometry.attributes.position.setX(i, positionClone[iX] + normalsClone[iX] * (xSin + yCos))
-    geometry.attributes.position.setY(i, positionClone[iY] + normalsClone[iY] * (xSin + yCos))
-    geometry.attributes.position.setZ(i, positionClone[iZ] + normalsClone[iZ] * (xSin + yCos))
+      geometry.attributes.position.setX(i, positionClone[iX] + normalsClone[iX] * (xSin + yCos))
+      geometry.attributes.position.setY(i, positionClone[iY] + normalsClone[iY] * (xSin + yCos))
+      geometry.attributes.position.setZ(i, positionClone[iZ] + normalsClone[iZ] * (xSin + yCos))
 
     }
 
-    geometry.computeVertexNormals()
     geometry.attributes.position.needsUpdate = true
 
     // Slowly move the camera around to give some life...
     camera.translateZ(Math.sin(time * 0.001) * 0.0005);
-    
-    return  animate(time, renderer, scene, camera)
-  }
-   
-  );
+
+    return  animate(time, composer)
+  });
 
   addEventListener("resize", onResizeScreen);
 });
