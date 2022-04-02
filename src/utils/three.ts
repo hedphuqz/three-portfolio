@@ -2,8 +2,10 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { BokehPass } from "three/examples/jsm/postprocessing/BokehPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import * as TWEEN from "@tweenjs/tween.js";
+
+type Direction = 'left' | 'right' | 'down' | 'up'
 
 export const initScene = () => {
   const camera = new THREE.PerspectiveCamera(
@@ -21,9 +23,8 @@ export const initScene = () => {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.2;
-  controls.rotateSpeed = 1;
-  controls.zoomSpeed = 0.4;
-  controls.minDistance = 0.6;
+  controls.enableZoom = false
+  controls.rotateSpeed = 1
 
   return { camera, scene, renderer, controls };
 };
@@ -48,14 +49,39 @@ export const createWireSphere = () => {
   return { sphere, geometry, material };
 };
 
+export const createArrow = async (direction: Direction, position: THREE.Vector3Tuple) => {
+  const arrowMaterial = new THREE.MeshStandardMaterial({color: 0xff8f13,  emissive: 0xff8f13})
+  const arrow = await new Promise<THREE.Object3D>((resolve, reject) => {
+    const loader = new THREE.ObjectLoader()
+    loader.load('/arrow.json',
+      resolve,
+      console.log,
+      reject
+    )
+  })
+
+  arrow.position.set(...position)
+  
+  // Had to cast nodes to any to set material... :( 
+  arrow.traverse(function (node: any) {
+    console.log(node)
+    node.material = arrowMaterial
+  })
+  
+  return arrow
+
+
+  
+}
+  
+
 export const tweenCamera = (
   camera: THREE.Camera,
-  controls: OrbitControls,
   coords: { x?: number; y?: number; z?: number }
 ) => {
-  coords.x = coords.x ? coords.x : camera.position.x;
-  coords.y = coords.y ? coords.y : camera.position.y;
-  coords.z = coords.z ? coords.z : camera.position.z;
+  coords.x = coords.x ?? camera.position.x;
+  coords.y = coords.y ?? camera.position.y;
+  coords.z = coords.z ?? camera.position.z;
 
   console.log(coords)
   new TWEEN.Tween(camera.position)
@@ -65,20 +91,26 @@ export const tweenCamera = (
 
 };
 
-export const animate = (
-  time: number,
-  renderer: THREE.WebGLRenderer,
-  scene: THREE.Scene,
-  camera: THREE.PerspectiveCamera
-) => {
+export const setupPostProcessing = (renderer:  THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) => {
   const composer = new EffectComposer(renderer);
 
+  
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
+  
+  const unrealBloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.85, 0, 0.5)
+  composer.addPass(unrealBloomPass)
 
-  const bokehPass = new BokehPass(scene, camera, { focus: 0.5 });
-  composer.addPass(bokehPass);
+  return composer
+}
+
+export const animate = (
+  time: number,
+  renderer: EffectComposer
+) => {
 
   TWEEN.update(time)
-  composer.render();
+  renderer.render();
 };
