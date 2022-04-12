@@ -7,14 +7,50 @@ import * as TWEEN from "@tweenjs/tween.js";
 import arrowModel from '../assets/arrow.json'
 import {ArrowCollection, Direction} from '../types'
 import { generateUUID } from "three/src/math/MathUtils";
+import EventEmitter from "events";
 
-// Because we need to pass our LastIntersected in as a reference,
-// we need to create a class to maintain a memory pointer.
-export class LastIntersected {
-  value: any;
+const ORIGIN = new THREE.Vector3(0,0,0)
+
+export  declare interface IntersectEmitter {
+  on(event: 'mouseout', listener: (object: any) => void): this;
+  on(event: 'mousein', listener: (object: any) => void): this;
+}
+
+export class IntersectEmitter extends EventEmitter {
+  lastIntersected: any;
   constructor() {
-    this.value = null
+    super()
+    this.lastIntersected = null
   }
+
+findIntersects(intersects: any) {
+  if (intersects.length > 0) {
+    const intersectedObject = intersects[0].object;
+
+    if (this.lastIntersected === null) {
+      // Mouse moves over object, intersect detected
+      // after absence.
+      this.lastIntersected = intersectedObject
+      this.emit('mousein', intersectedObject)
+    }
+    
+
+    if (this.lastIntersected.uuid !== intersectedObject.uuid) {
+        // pointer has moved onto a new object now so we need to trriger
+      // mouseout and mousein
+      this.emit('mouseout', this.lastIntersected)
+      this.lastIntersected = intersectedObject
+      this.emit('mousein', this.lastIntersected)
+      }
+  } else {
+    // If no intersect, simple emit mouseout and move on
+    if (this.lastIntersected) {
+      this.emit('mouseout', this.lastIntersected)
+      this.lastIntersected = null;
+    }
+  }
+}
+
 }
 
 export const initScene = () => {
@@ -34,7 +70,8 @@ export const initScene = () => {
   controls.enableDamping = true;
   controls.dampingFactor = 0.2;
   controls.enableZoom = false
-  controls.rotateSpeed = 1
+  controls.enableRotate = false
+  controls.enablePan = false
 
   return { camera, scene, renderer, controls };
 };
@@ -58,61 +95,6 @@ export const createWireSphere = () => {
   const sphere = new THREE.Mesh(geometry, material);
   return { sphere, geometry, material };
 };
-
-
-export const findIntersects = (intersects: any, lastIntersected: LastIntersected) => {
-  if (intersects.length > 0) {
-    const intersectedObject = intersects[0].object;
-
-    if (intersectedObject.geometry.type === 'SphereGeometry') {
-      if (lastIntersected.value === null) {
-          // Ensure that once we've set the hex we don't try to reset it
-          return
-        }
-        // Set intersects to null when we move the pointer to our sphere.
-        lastIntersected?.value?.material?.emissive?.setHex(lastIntersected.value.originalHex);
-        lastIntersected.value = null;
-  
-        return
-      }
-
-
-    if (intersectedObject?.material?.emissive) {
-      // Only work with emissives
-
-
-      if (lastIntersected.value === null) {
-        // Populate our lastIntersected and assign old hex
-        lastIntersected.value = intersectedObject;
-          lastIntersected.value.originalHex =
-            lastIntersected.value.material.emissive.getHex();
-          intersectedObject.material.emissive.setHex(0xbbbb77);
-      }
-
-
-      if (lastIntersected.value.uuid != intersectedObject.uuid) {
-        // Update lastIntersected so we have a reference to the object
-        lastIntersected.value.material.emissive.setHex(lastIntersected.value.originalHex);
-
-        lastIntersected.value = intersectedObject;
-          // Exclude our sphere
-          lastIntersected.value.originalHex =
-            lastIntersected.value.material.emissive.getHex();
-          intersectedObject.material.emissive.setHex(0xbbbb77);
-      }
-
-
-    }
-
-
-  } else {
-    // If no intersect, simply apply old color and skip
-    if (lastIntersected.value) {
-      lastIntersected.value.material.emissive.setHex(lastIntersected.value.originalHex);
-      lastIntersected.value = null;
-    }
-  }
-}
 
 const adjustPosition = (position: THREE.Vector3, adjustment: THREE.Vector3) => position.add(adjustment).toArray()
 
@@ -139,8 +121,8 @@ export const createArrow = async (direction: Direction, principalPosition: THREE
 
   if (direction === 'right') {
     arrow.userData['direction'] = 'right'
-    arrow.rotateZ(90 * (Math.PI / 180))
-    const adjustedPosition = adjustPosition(arrow.position, new THREE.Vector3(-0.01, 0, 0))
+    arrow.rotateZ(270 * (Math.PI / 180))
+    const adjustedPosition = adjustPosition(arrow.position, new THREE.Vector3(0.01, 0, 0))
     arrow.position.set(...adjustedPosition)
 
   }
@@ -155,19 +137,17 @@ export const createArrow = async (direction: Direction, principalPosition: THREE
 
   if (direction === 'left') {
     arrow.userData['direction'] = 'left'
-    arrow.rotateZ(270 * (Math.PI / 180))
-    const adjustedPosition = adjustPosition(arrow.position, new THREE.Vector3(0.01, 0, 0))
+    arrow.rotateZ(90 * (Math.PI / 180))
+    const adjustedPosition = adjustPosition(arrow.position, new THREE.Vector3(-0.01, 0, 0))
     arrow.position.set(...adjustedPosition)
 
-  }
-
-  
+  }  
   // Had to cast nodes to any to set material... :( 
-  arrow.traverse(function (node: any) {
+    arrow.traverse(function (node: any) {
     node.material = arrowMaterial
-  })
+    })
   
-  return arrow  
+    return arrow  
 }
 
 export const createArrowGroup = async (arrows: ArrowCollection) => {
@@ -184,6 +164,25 @@ export const createArrowGroup = async (arrows: ArrowCollection) => {
   return group
 }
 
+export const tweenObjectPosition = (
+  tweenState: Record<string, TWEEN.Tween<{ x?: number; y?: number; z?: number }>>,
+  object: THREE.Group | THREE.Object3D,
+  coords: { x?: number; y?: number; z?: number }
+) => {
+  coords.x = coords.x ?? object.position.x;
+  coords.y = coords.y ?? object.position.y;
+  coords.z = coords.z ?? object.position.z;
+
+  const tween = new TWEEN.Tween(object.position)
+    .to(coords, 1000)
+    .easing(TWEEN.Easing.Quadratic.InOut)
+    .start();
+
+  tweenState[object.uuid] = tween
+  
+
+}
+
 export const tweenCamera = (
   camera: THREE.Camera,
   coords: { x?: number; y?: number; z?: number }
@@ -195,6 +194,7 @@ export const tweenCamera = (
   new TWEEN.Tween(camera.position)
     .to(coords, 10000)
     .easing(TWEEN.Easing.Quadratic.InOut)
+    .onUpdate(() => camera.lookAt(ORIGIN))
     .start();
 
 };
